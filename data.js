@@ -2,8 +2,8 @@
 'use strict';
 
 const NATUREZAS = [
-  { id: 'abigeato', nome: 'Furto de semovente (abigeato)', cap: 'Art. 155, §6º, CP', grupo: 'animal' },
-  { id: 'roubo_animal', nome: 'Roubo de semovente', cap: 'Art. 157, CP', grupo: 'animal' },
+  { id: 'abigeato', nome: 'Furto de animais (abigeato)', cap: 'Art. 155, §6º, CP', grupo: 'animal' },
+  { id: 'roubo_animal', nome: 'Roubo de animais', cap: 'Art. 157, CP', grupo: 'animal' },
   { id: 'recep_animal', nome: 'Receptação de animal', cap: 'Art. 180-A, CP', grupo: 'animal' },
   { id: 'maquinario', nome: 'Furto/roubo de máquinas e implementos', cap: 'Arts. 155/157, CP', grupo: 'maquina' },
   { id: 'gps', nome: 'Furto/roubo de GPS e agricultura de precisão', cap: 'Arts. 155/157, CP', grupo: 'maquina' },
@@ -25,7 +25,7 @@ const PAPEIS = [
 ];
 
 const CATEGORIAS_BEM = [
-  { id: 'animal', nome: 'Semovente (animal)' },
+  { id: 'animal', nome: 'Animal' },
   { id: 'maquina', nome: 'Máquina / implemento / veículo' },
   { id: 'eletronico', nome: 'GPS / eletrônico / agricultura de precisão' },
   { id: 'insumo', nome: 'Defensivo / fertilizante / semente' },
@@ -61,7 +61,7 @@ const CHECK_COMUM = [
 ];
 
 const CHECK_ESPECIFICO = {
-  animal: { s: 'Semoventes', itens: [
+  animal: { s: 'Animais', itens: [
     ['a1', 'Contagem do rebanho e diferença apurada (data da última contagem)'],
     ['a2', 'Saldo/ficha sanitária do rebanho na Iagro (comprovante)'],
     ['a3', 'Certidão de registro da marca (ferro) e desenho/foto da marca'],
@@ -109,7 +109,7 @@ const LEGISLACAO = [
     { t: 'Furto — art. 155', p: 'Reclusão 1 a 4 anos e multa (caput)',
       r: 'Subtrair, para si ou para outrem, coisa alheia móvel. §1º: aumento de 1/3 se praticado durante o repouso noturno. §2º: furto privilegiado (primário e coisa de pequeno valor). §4º: qualificado (2 a 8 anos) — destruição/rompimento de obstáculo; abuso de confiança, fraude, escalada ou destreza; chave falsa; concurso de duas ou mais pessoas. §5º: veículo automotor levado a outro Estado ou ao exterior (3 a 8 anos).' },
     { t: 'Abigeato — art. 155, §6º', p: 'Reclusão 2 a 5 anos',
-      r: 'Subtração de semovente domesticável de produção, ainda que abatido ou dividido em partes no local da subtração (Lei 13.330/2016). Exige animal destinado à produção. Há debate sobre concurso com as qualificadoras do §4º.' },
+      r: 'Subtração de semovente domesticável de produção, ainda que abatido ou dividido em partes no local da subtração (Lei 13.330/2016). Na redação legal, "semovente domesticável de produção" = animal de criação destinado à produção (bovinos, equinos, ovinos, suínos etc.). Há debate sobre concurso com as qualificadoras do §4º.' },
     { t: 'Roubo — art. 157', p: 'Reclusão 4 a 10 anos e multa',
       r: 'Subtração mediante grave ameaça ou violência à pessoa, ou após reduzi-la à impossibilidade de resistência. §2º: aumento de 1/3 até metade (ex.: concurso de agentes, restrição de liberdade da vítima, veículo levado a outro Estado). §2º-A: aumento de 2/3 com emprego de arma de fogo.' },
     { t: 'Supressão ou alteração de marca em animais — art. 162', p: 'Detenção 6 meses a 3 anos e multa',

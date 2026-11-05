@@ -1,5 +1,5 @@
 /* Service worker: guarda os arquivos do app para uso offline no campo. Não armazena dados de ocorrências. */
-const CACHE = 'deleagro-campo-v5';
+const CACHE = 'deleagro-campo-v6';
 const ARQUIVOS = ['./', './index.html', './app.js', './data.js', './anexos.js', './historico.js', './lib/hashwasm-sha256.js', './manifest.json', './lib/jspdf.umd.min.js', './lib/exifr.lite.js', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './logo-deleagro.png', './logo-pcms.png'];
 
 self.addEventListener('install', e => {

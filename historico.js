@@ -5,9 +5,9 @@
 'use strict';
 
 const DESC_NATUREZA = {
-  abigeato: 'a subtração de semoventes (abigeato)',
-  roubo_animal: 'o roubo de semoventes',
-  recep_animal: 'a receptação de semoventes de origem ilícita',
+  abigeato: 'a subtração de animais (abigeato)',
+  roubo_animal: 'o roubo de animais',
+  recep_animal: 'a receptação de animais de origem ilícita',
   maquinario: 'a subtração de máquinas/implementos agrícolas',
   gps: 'a subtração de equipamentos de agricultura de precisão (GPS)',
   defensivos: 'a subtração de defensivos/insumos agrícolas',

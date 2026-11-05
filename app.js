@@ -480,7 +480,7 @@ function telaLeis() {
   return `${marca('Legislação', 'Consulta rápida — resumos')}
   <main>
     <div class="warn info">Resumos para consulta em campo. Confira sempre o texto vigente no Planalto antes de capitular.</div>
-    <div class="busca"><input type="search" placeholder="Buscar: semovente, marca, receptação, agrotóxico…" value="${esc(S.buscaLei || '')}" data-busca-lei></div>
+    <div class="busca"><input type="search" placeholder="Buscar: animal, abigeato, marca, receptação, agrotóxico…" value="${esc(S.buscaLei || '')}" data-busca-lei></div>
     ${grupos.map(g => `<section class="box"><h2>${esc(g.g)}</h2>
       ${g.itens.map(i => `<details class="lei"><summary><b>${esc(i.t)}</b><span class="pena">${esc(i.p)}</span></summary><p>${esc(i.r)}</p></details>`).join('')}</section>`).join('') || '<p class="muted">Nada encontrado.</p>'}
     <p class="muted center"><a href="https://www.planalto.gov.br/ccivil_03/decreto-lei/del2848compilado.htm" target="_blank" rel="noopener">Código Penal compilado (Planalto)</a></p>
