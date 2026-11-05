@@ -39,8 +39,12 @@ const DB = {
   async abrir() {
     try {
       this.db = await new Promise((ok, err) => {
-        const r = indexedDB.open('deleagro-campo', 1);
-        r.onupgradeneeded = () => r.result.createObjectStore('casos', { keyPath: 'id' });
+        const r = indexedDB.open('deleagro-campo', 2);
+        r.onupgradeneeded = () => {
+          const d = r.result;
+          if (!d.objectStoreNames.contains('casos')) d.createObjectStore('casos', { keyPath: 'id' });
+          if (!d.objectStoreNames.contains('anexos')) d.createObjectStore('anexos', { keyPath: 'id' }).createIndex('casoId', 'casoId');
+        };
         r.onsuccess = () => ok(r.result);
         r.onerror = () => err(r.error);
       });
@@ -48,7 +52,16 @@ const DB = {
       try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
     } catch (e) { this.db = null; this.persistente = false; }
   },
-  tx(modo) { return this.db.transaction('casos', modo).objectStore('casos'); },
+  tx(modo, st = 'casos') { return this.db.transaction(st, modo).objectStore(st); },
+  memAnexos: new Map(),
+  req(r) { return new Promise((ok, err) => { r.onsuccess = () => ok(r.result); r.onerror = () => err(r.error); }); },
+  async putAnexo(reg) { if (!this.db) { this.memAnexos.set(reg.id, reg); return; } return this.req(this.tx('readwrite', 'anexos').put(reg)); },
+  async getAnexo(id) { if (!this.db) return this.memAnexos.get(id); return this.req(this.tx('readonly', 'anexos').get(id)); },
+  async apagarAnexo(id) { if (!this.db) { this.memAnexos.delete(id); return; } return this.req(this.tx('readwrite', 'anexos').delete(id)); },
+  async anexosDoCaso(casoId) {
+    if (!this.db) return [...this.memAnexos.values()].filter(x => x.casoId === casoId);
+    return this.req(this.tx('readonly', 'anexos').index('casoId').getAll(casoId));
+  },
   async todos() {
     if (!this.db) return [...this.mem.values()];
     return new Promise((ok, err) => { const r = this.tx('readonly').getAll(); r.onsuccess = () => ok(r.result); r.onerror = () => err(r.error); });
@@ -123,7 +136,9 @@ function render() {
   else if (S.tela === 'ajustes') app.innerHTML = telaAjustes();
   document.querySelectorAll('.tabbar button').forEach(b => b.classList.toggle('on', b.dataset.tela === (S.tela === 'caso' ? 'lista' : S.tela)));
   $('.tabbar').style.display = S.tela === 'caso' ? 'none' : '';
-  window.scrollTo(0, 0);
+  const chave = S.tela + '|' + S.aba + '|' + S.casoId;
+  if (chave !== S._ult) window.scrollTo(0, 0);
+  S._ult = chave;
 }
 
 /* ----- lista de ocorrências ----- */
@@ -225,6 +240,34 @@ function abaPessoas(c) {
   return grupos.join('');
 }
 
+/* Liga botões de anexos/desenho dentro de um formulário (pessoa ou bem) */
+function ligarAnexos(el, c, dono, lista, form, reabrir) {
+  const sync = () => { Object.assign(dono, Object.fromEntries(new FormData(form))); if (!lista().includes(dono)) lista().push(dono); dono.anexos = dono.anexos || []; };
+  el.querySelectorAll('[data-anx]').forEach(b => b.onclick = () => { sync(); verAnexo(c, dono, dono.anexos.find(m => m.id === b.dataset.anx), reabrir); });
+  el.querySelectorAll('[data-add-anx]').forEach(inp => inp.onchange = async () => {
+    const files = [...inp.files]; if (!files.length) return;
+    sync();
+    abrirFolha(`<h2>Processando anexo…</h2><p class="muted" id="anxprog">Calculando hash e gerando miniatura. Vídeos longos podem levar alguns segundos.</p>`);
+    for (const [i, f] of files.entries()) {
+      try {
+        const pg = $('#anxprog'); if (pg) pg.textContent = 'Arquivo ' + (i + 1) + ' de ' + files.length + ': ' + f.name + ' (' + fmtTam(f.size) + ')';
+        let origem = inp.dataset.addAnx;
+        if (origem === 'auto') origem = (f.type || '').startsWith('image/') ? 'foto' : 'documento';
+        dono.anexos.push(await criarAnexo(c, f, origem));
+      } catch (e) { toast('Falha ao anexar ' + f.name); }
+    }
+    await DB.salvar(c); toast('Anexo salvo'); reabrir();
+  });
+  const d = $('[data-desenhar]', el);
+  if (d) d.onclick = () => { sync(); abrirDesenho(async (file, leg) => {
+    abrirFolha('<h2>Salvando desenho…</h2>');
+    dono.anexos.push(await criarAnexo(c, file, 'desenho', { legenda: leg }));
+    if (leg && !dono.marca) dono.marca = leg;
+    await DB.salvar(c); toast('Desenho salvo'); reabrir();
+  }, reabrir); };
+}
+async function apagarAnexosDe(dono) { for (const m of (dono.anexos || [])) { try { await DB.apagarAnexo(m.id); } catch (e) {} } }
+
 function formPessoa(c, x) {
   const novo = !c.pessoas.includes(x);
   const susp = x.papel === 'suspeito';
@@ -243,6 +286,11 @@ function formPessoa(c, x) {
       ${f('Relação com o fato / com a vítima', 'relacao', 'text', 'placeholder="Ex.: proprietário, capataz, vizinho, comprador"')}
       ${susp ? f('Veículos / placas', 'veiculos') + a('Características físicas e sinais', 'caracteristicas') + a('Elementos de autoria', 'indicios', 'Câmeras, reconhecimento, GTA, conversas, apreensões…') : ''}
       ${a('Síntese das declarações', 'relato')}
+      <section class="sub"><h3>Oitiva em vídeo e anexos</h3>
+        <div class="row wrap"><label class="btn file">Gravar / anexar vídeo<input type="file" accept="video/*" data-add-anx="oitiva" hidden></label>
+        <label class="btn ghost file">Anexar arquivo<input type="file" multiple data-add-anx="documento" hidden></label></div>
+        <p class="muted small">No iPhone, “Gravar vídeo” abre a câmera; o arquivo fica só no aparelho, com hash SHA-256 para a cadeia de custódia.</p>
+        ${htmlAnexos(x.anexos)}</section>
       <div class="row end">
         ${novo ? '' : '<button type="button" class="btn danger ghost" data-del>Excluir</button>'}
         <button type="button" class="btn ghost" data-cancel>Cancelar</button>
@@ -250,9 +298,10 @@ function formPessoa(c, x) {
     </form>`, el => {
     const form = $('#fp', el);
     form.papel.onchange = () => { Object.assign(x, Object.fromEntries(new FormData(form))); formPessoa(c, x); };
-    $('[data-cancel]', el).onclick = fecharFolha;
+    ligarAnexos(el, c, x, () => c.pessoas, form, () => { formPessoa(c, x); render(); });
+    $('[data-cancel]', el).onclick = () => { fecharFolha(); render(); };
     const del = $('[data-del]', el);
-    if (del) del.onclick = async () => { if (await confirmar('Excluir esta pessoa?', 'Excluir')) { c.pessoas = c.pessoas.filter(p => p !== x); await DB.salvar(c); render(); } };
+    if (del) del.onclick = async () => { if (await confirmar('Excluir esta pessoa e seus anexos?', 'Excluir')) { await apagarAnexosDe(x); c.pessoas = c.pessoas.filter(p => p !== x); await DB.salvar(c); render(); } };
     form.onsubmit = async e => {
       e.preventDefault();
       Object.assign(x, Object.fromEntries(new FormData(form)));
@@ -293,6 +342,12 @@ function formBem(c, b) {
         ${f('Unidade (L, kg, sacas, t)', 'unidade')}` : ''}
       <div class="g2">${f('Valor unitário estimado (R$)', 'valor', 'number', 'step="0.01" inputmode="decimal"')}${f('Nota fiscal / documento', 'nf')}</div>
       <label class="f"><span>Sinais particulares / observações</span><textarea name="obs" rows="3">${esc(b.obs)}</textarea></label>
+      <section class="sub"><h3>Anexos e desenho</h3>
+        <div class="row wrap">
+          <button type="button" class="btn" data-desenhar>${animal ? 'Desenhar marca' : 'Desenho livre'}</button>
+          <label class="btn ghost file">Foto / nota fiscal / PDF<input type="file" accept="image/*,application/pdf" multiple data-add-anx="auto" hidden></label></div>
+        <p class="muted small">Anexe notas fiscais, GTAs, fotos da marca e dos animais. O desenho da marca entra no relatório em PDF.</p>
+        ${htmlAnexos(b.anexos)}</section>
       <div class="row end">
         ${novo ? '' : '<button type="button" class="btn danger ghost" data-del>Excluir</button>'}
         <button type="button" class="btn ghost" data-cancel>Cancelar</button>
@@ -300,9 +355,10 @@ function formBem(c, b) {
     </form>`, el => {
     const form = $('#fb', el);
     form.categoria.onchange = () => { Object.assign(b, Object.fromEntries(new FormData(form))); formBem(c, b); };
-    $('[data-cancel]', el).onclick = fecharFolha;
+    ligarAnexos(el, c, b, () => c.bens, form, () => { formBem(c, b); render(); });
+    $('[data-cancel]', el).onclick = () => { fecharFolha(); render(); };
     const del = $('[data-del]', el);
-    if (del) del.onclick = async () => { if (await confirmar('Excluir este bem?', 'Excluir')) { c.bens = c.bens.filter(x => x !== b); await DB.salvar(c); render(); } };
+    if (del) del.onclick = async () => { if (await confirmar('Excluir este bem e seus anexos?', 'Excluir')) { await apagarAnexosDe(b); c.bens = c.bens.filter(x => x !== b); await DB.salvar(c); render(); } };
     form.onsubmit = async e => {
       e.preventDefault();
       Object.assign(b, Object.fromEntries(new FormData(form)));
@@ -328,12 +384,26 @@ function abaCheck(c) {
     ${secoesChecklist(c).map(s => `<section class="box"><h2>${esc(s.s)}</h2>
       ${s.itens.map(([id, t]) => { const v = c.checklist[id] || {}; return `<div class="chk ${v.ok ? 'ok' : ''}">
         <label><input type="checkbox" data-chk="${id}" ${v.ok ? 'checked' : ''}><span>${esc(t)}</span></label>
-        <input class="obs" placeholder="Observação" data-chkobs="${id}" value="${esc(v.obs)}"></div>`; }).join('')}
+        <div class="obs-row"><input class="obs" placeholder="Observação" data-chkobs="${id}" value="${esc(v.obs)}">
+          <label class="btn ghost sm file clip" title="Anexar foto, documento, vídeo ou arquivo">📎<input type="file" multiple data-chk-anx="${id}" hidden></label></div>
+        ${v.anexos && v.anexos.length ? `<div data-chkitem="${id}">${htmlAnexos(v.anexos)}</div>` : ''}</div>`; }).join('')}
     </section>`).join('')}`;
 }
 
 /* ----- relatório ----- */
+/* Numeração dos anexos para referência cruzada no relatório */
+function numerarAnexos(c) {
+  const lista = [];
+  c.pessoas.forEach(p => (p.anexos || []).forEach(m => lista.push({ m, ref: 'Pessoa: ' + (p.nome || papel(p.papel).nome) + ' (' + papel(p.papel).nome.toLowerCase() + ')' })));
+  c.bens.forEach(b => (b.anexos || []).forEach(m => lista.push({ m, ref: 'Bem: ' + (b.descricao || catBem(b.categoria).nome) })));
+  itensChecklist(c).forEach(([id, t]) => ((c.checklist[id] || {}).anexos || []).forEach(m => lista.push({ m, ref: 'Diligência: ' + t })));
+  const num = {}; lista.forEach((x, i) => { num[x.m.id] = 'A' + (i + 1); x.n = 'A' + (i + 1); });
+  return { lista, num };
+}
+const linhaAnexo = (m, num) => num[m.id] + ' — ' + (ROT_ORIGEM[m.origem] || 'Anexo') + (m.legenda ? ': ' + m.legenda : '') + ' (' + [m.nome, fmtDur(m.duracao), fmtTam(m.tamanho)].filter(Boolean).join(', ') + ')';
+
 function textoRelatorio(c) {
+  const { num } = numerarAnexos(c);
   const n = natureza(c.natureza), L = c.local, linhas = [];
   const add = (...l) => linhas.push(...l);
   add('LEVANTAMENTO DE CAMPO — ' + (c.unidade || 'DELEAGRO').toUpperCase(), '');
@@ -358,6 +428,7 @@ function textoRelatorio(c) {
     if (x.caracteristicas) add('  Características: ' + x.caracteristicas);
     if (x.indicios) add('  Elementos de autoria: ' + x.indicios);
     if (x.relato) add('  Declarações: ' + x.relato);
+    (x.anexos || []).forEach(m => add('  Anexo ' + linhaAnexo(m, num)));
   }));
   add('', '3. BENS');
   if (!c.bens.length) add('Nenhum bem cadastrado.');
@@ -368,11 +439,15 @@ function textoRelatorio(c) {
       b.fabricante, b.modelo, b.ano, b.serie && 'série ' + b.serie, b.placa, b.lote && 'lote ' + b.lote, b.unidade, b.nf && 'doc. ' + b.nf].filter(Boolean).join(', ');
     add('• ' + q + '× ' + (b.descricao || catBem(b.categoria).nome) + (det ? ' — ' + det : '') + ' [' + (b.situacao || 'Subtraído') + ']' + (b.valor ? ' — ' + moeda(b.valor) + ' cada' : ''));
     if (b.obs) add('  Obs.: ' + b.obs);
+    (b.anexos || []).forEach(m => add('  Anexo ' + linhaAnexo(m, num)));
   });
   if (total) add('Valor estimado total: ' + moeda(total));
   add('', '4. DILIGÊNCIAS (CHECKLIST)');
   secoesChecklist(c).forEach(s => s.itens.forEach(([id, t]) => {
-    const v = c.checklist[id]; if (v && (v.ok || v.obs)) add((v.ok ? '[x] ' : '[ ] ') + t + (v.obs ? ' — ' + v.obs : ''));
+    const v = c.checklist[id]; if (v && (v.ok || v.obs || (v.anexos || []).length)) {
+      add((v.ok ? '[x] ' : '[ ] ') + t + (v.obs ? ' — ' + v.obs : ''));
+      (v.anexos || []).forEach(m => add('  Anexo ' + linhaAnexo(m, num)));
+    }
   }));
   const pend = itensChecklist(c).filter(([id]) => !c.checklist[id]?.ok);
   if (pend.length) { add('', 'Pendentes:'); pend.forEach(([, t]) => add('[ ] ' + t)); }
@@ -417,7 +492,7 @@ function telaAjustes() {
       <p class="muted">${pin ? 'Ativo. O app pede o PIN ao abrir e após 5 minutos em segundo plano.' : 'Inativo.'} O PIN impede o acesso casual, mas não criptografa os dados; mantenha também o bloqueio do iPhone ativo.</p>
       <div class="row">${pin ? '<button class="btn ghost" data-acao="pin-off">Desativar PIN</button><button class="btn ghost" data-acao="pin-on">Trocar PIN</button>' : '<button class="btn" data-acao="pin-on">Definir PIN</button>'}</div></section>
     <section class="box"><h2>Backup</h2>
-      <p class="muted">${S.casos.length} ocorrência(s) neste aparelho. O backup é um arquivo .json com tudo, inclusive fotos. Guarde em local seguro.</p>
+      <p class="muted">${S.casos.length} ocorrência(s) neste aparelho. O backup é um arquivo .json com tudo, inclusive fotos, vídeos e anexos (pode ficar grande). Guarde em local seguro.</p>
       <div class="row wrap"><button class="btn" data-acao="exportar">Exportar tudo</button>
         <label class="btn ghost file">Importar backup<input type="file" accept="application/json,.json" data-acao="importar" hidden></label></div></section>
     <section class="box"><h2>Apagar dados</h2>
@@ -540,7 +615,13 @@ async function compartilharArquivo(nome, conteudo, tipo) {
     toast('Arquivo gerado');
   } catch (e) { toast('Exportação indisponível neste ambiente'); }
 }
-function backupJSON(casos) { return JSON.stringify({ app: 'deleagro-campo', versao: 1, exportado: new Date().toISOString(), casos }, null, 1); }
+async function backupJSON(casos) {
+  const anexos = [];
+  for (const c of casos) for (const r of await DB.anexosDoCaso(c.id)) {
+    const { blob, ...meta } = r; anexos.push({ ...meta, base64: blob ? await blobParaBase64(blob) : '' });
+  }
+  return JSON.stringify({ app: 'deleagro-campo', versao: 2, exportado: new Date().toISOString(), casos, anexos });
+}
 
 async function importar(file) {
   try {
@@ -548,12 +629,13 @@ async function importar(file) {
     if (d.app !== 'deleagro-campo' || !Array.isArray(d.casos)) throw 0;
     let n = 0;
     for (const c of d.casos) { if (c && c.id && c.local) { await DB.salvar(c); n++; } }
+    for (const x of (d.anexos || [])) { const { base64, ...meta } = x; if (meta.id && base64) await DB.putAnexo({ ...meta, blob: base64ParaBlob(base64, meta.tipo || 'application/octet-stream') }); }
     S.casos = await DB.todos(); render(); toast(n + ' ocorrência(s) importada(s)');
   } catch (e) { toast('Arquivo de backup inválido'); }
 }
 
 /* ----- PDF único com dados, fotos e metadados ----- */
-function montarPDF(c) {
+async function montarPDF(c) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
   const W = 210, H = 297, M = 16, LW = W - 2 * M;
@@ -630,6 +712,51 @@ function montarPDF(c) {
     doc.setTextColor(30);
   }
 
+  // Anexos (oitivas em vídeo, documentos, desenhos de marcas, arquivos do checklist)
+  const { lista: anx } = numerarAnexos(c);
+  if (anx.length) {
+    novaPag();
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...verde);
+    doc.text('ANEXOS — ' + anx.length + ' arquivo(s)', M, y);
+    doc.line(M, y + 1.5, W - M, y + 1.5); y += 8; doc.setTextColor(30);
+    for (const { m, ref, n } of anx) {
+      const img = await dataURLDeAnexo(m);
+      const meta = metaAnexo(m).filter(([k]) => k !== 'Tipo');
+      const r = img ? img.h / img.w : 0;
+      const maxH = m.origem === 'desenho' ? 70 : m.tipo.startsWith('video/') ? 60 : 105;
+      let iw = img ? LW : 0, ih = img ? iw * r : 0; if (ih > maxH) { ih = maxH; iw = ih / r; }
+      garante(ih + 16 + meta.length * 4.2 + 8);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5);
+      doc.text(doc.splitTextToSize(n + ' — ' + (ROT_ORIGEM[m.origem] || 'Anexo') + (m.legenda ? ': ' + m.legenda : ''), LW)[0], M, y); y += 4.6;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(90);
+      doc.text(doc.splitTextToSize('Vinculado a — ' + ref, LW)[0], M, y); y += 5; doc.setTextColor(30);
+      if (img) {
+        const x0 = M + (LW - iw) / 2;
+        try { doc.addImage(img.data, img.fmt, x0, y, iw, ih, undefined, 'FAST'); } catch (e) {}
+        doc.setDrawColor(180); doc.rect(x0, y, iw, ih);
+        if (m.tipo.startsWith('video/')) {
+          doc.setFillColor(0, 0, 0); doc.rect(x0, y + ih - 6, iw, 6, 'F');
+          doc.setTextColor(255); doc.setFontSize(7.5); doc.text('Quadro do vídeo · duração ' + (fmtDur(m.duracao) || '—'), x0 + 2, y + ih - 2); doc.setTextColor(30);
+        }
+        y += ih + 4;
+      } else {
+        doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(90);
+        doc.text('Arquivo preservado no aparelho; não incorporado ao PDF.', M, y); y += 4.6; doc.setTextColor(30);
+      }
+      doc.setFontSize(7.8);
+      meta.forEach(([k, v]) => {
+        doc.setFont('helvetica', 'bold'); doc.text(k + ':', M, y);
+        doc.setFont(k.startsWith('SHA') ? 'courier' : 'helvetica', 'normal');
+        doc.text(doc.splitTextToSize(String(v), LW - 40)[0], M + 40, y); y += 4.2;
+      });
+      y += 7;
+    }
+    garante(14);
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(90);
+    doc.text(doc.splitTextToSize('Vídeos e documentos originais permanecem no aparelho e podem ser compartilhados separadamente; o hash SHA-256 permite verificar que o arquivo entregue é o mesmo registrado.', LW), M, y);
+    doc.setTextColor(30);
+  }
+
   // Rodapé em todas as páginas
   const n = doc.getNumberOfPages();
   for (let p = 1; p <= n; p++) {
@@ -644,7 +771,7 @@ async function gerarPDF(c) {
   if (!window.jspdf) return toast('Gerador de PDF não carregou');
   toast('Gerando PDF…');
   try {
-    const doc = montarPDF(c);
+    const doc = await montarPDF(c);
     const nome = 'levantamento-' + (c.bo || c.local.propriedade || c.id).toString().replace(/[^\w-]+/g, '_') + '.pdf';
     const blob = doc.output('blob');
     abrirFolha(`<h2>PDF pronto</h2><p class="muted">${esc(nome)} · ${(blob.size / 1024 / 1024).toFixed(2)} MB · ${doc.getNumberOfPages()} página(s)</p>
@@ -706,6 +833,10 @@ document.addEventListener('click', async e => {
   if (t.dataset.abrir) { S.casoId = t.dataset.abrir; S.tela = 'caso'; S.aba = 'local'; render(); return; }
   if (t.dataset.aba) { S.aba = t.dataset.aba; render(); return; }
   if (t.dataset.foto) { verFoto(c, c.fotos.find(f => f.id === t.dataset.foto)); return; }
+  if (t.dataset.anx && t.closest('[data-chkitem]')) {
+    const item = c.checklist[t.closest('[data-chkitem]').dataset.chkitem];
+    verAnexo(c, item, item.anexos.find(m => m.id === t.dataset.anx), () => { fecharFolha(); render(); }); return;
+  }
   if (t.dataset.novaPessoa) { formPessoa(c, { id: uid(), papel: t.dataset.novaPessoa }); return; }
   if (t.dataset.pessoa) { formPessoa(c, c.pessoas.find(p => p.id === t.dataset.pessoa)); return; }
   if (t.dataset.bem) { formBem(c, c.bens.find(b => b.id === t.dataset.bem)); return; }
@@ -714,13 +845,13 @@ document.addEventListener('click', async e => {
     case 'voltar': S.tela = 'lista'; render(); break;
     case 'gps': capturarGPS(c); break;
     case 'novo-bem': formBem(c, { id: uid(), categoria: natureza(c.natureza).grupo === 'animal' ? 'animal' : natureza(c.natureza).id === 'gps' ? 'eletronico' : natureza(c.natureza).grupo === 'maquina' ? 'maquina' : natureza(c.natureza).grupo === 'insumo' ? 'insumo' : 'outro', quantidade: 1, situacao: 'Subtraído' }); break;
-    case 'apagar-caso': if (await confirmar('Excluir esta ocorrência e todos os seus dados? Não há como desfazer.', 'Excluir')) { await DB.apagar(c.id); S.casos = S.casos.filter(x => x !== c); S.tela = 'lista'; render(); toast('Ocorrência excluída'); } break;
+    case 'apagar-caso': if (await confirmar('Excluir esta ocorrência e todos os seus dados? Não há como desfazer.', 'Excluir')) { for (const m of await DB.anexosDoCaso(c.id)) await DB.apagarAnexo(m.id); await DB.apagar(c.id); S.casos = S.casos.filter(x => x !== c); S.tela = 'lista'; render(); toast('Ocorrência excluída'); } break;
     case 'copiar': copiar(textoRelatorio(c)); break;
     case 'compartilhar': try { if (navigator.share) await navigator.share({ title: 'Levantamento ' + (c.bo || ''), text: textoRelatorio(c) }); else copiar(textoRelatorio(c)); } catch (er) { if (er.name !== 'AbortError') copiar(textoRelatorio(c)); } break;
     case 'pdf': gerarPDF(c); break;
-    case 'exportar-caso': compartilharArquivo('ocorrencia-' + (c.bo || c.id) + '.json', backupJSON([c]), 'application/json'); break;
-    case 'exportar': compartilharArquivo('deleagro-campo-backup-' + hoje() + '.json', backupJSON(S.casos), 'application/json'); break;
-    case 'apagar-tudo': if (await confirmar('Apagar TODAS as ocorrências deste aparelho? Faça um backup antes.', 'Apagar tudo')) { for (const x of S.casos) await DB.apagar(x.id); S.casos = []; render(); toast('Dados apagados'); } break;
+    case 'exportar-caso': toast('Preparando backup…'); compartilharArquivo('ocorrencia-' + (c.bo || c.id).toString().replace(/[^\w-]+/g, '_') + '.json', await backupJSON([c]), 'application/json'); break;
+    case 'exportar': toast('Preparando backup…'); compartilharArquivo('deleagro-campo-backup-' + hoje() + '.json', await backupJSON(S.casos), 'application/json'); break;
+    case 'apagar-tudo': if (await confirmar('Apagar TODAS as ocorrências deste aparelho? Faça um backup antes.', 'Apagar tudo')) { for (const x of S.casos) { for (const m of await DB.anexosDoCaso(x.id)) await DB.apagarAnexo(m.id); await DB.apagar(x.id); } S.casos = []; render(); toast('Dados apagados'); } break;
     case 'pin-on': if (await telaPin('definir')) { toast('PIN definido'); render(); } break;
     case 'pin-off': if (await confirmar('Desativar o bloqueio por PIN?', 'Desativar')) { Pref.set('pinHash', null); render(); } break;
   }
@@ -742,6 +873,17 @@ document.addEventListener('change', async e => {
   if (t.dataset.acao === 'fotos' && t.files.length) { adicionarFotos(c, [...t.files]); return; }
   if (t.dataset.acao === 'importar' && t.files[0]) { importar(t.files[0]); return; }
   if (!c) return;
+  if (t.dataset.chkAnx && t.files.length) {
+    const id = t.dataset.chkAnx, item = c.checklist[id] = { ...(c.checklist[id] || {}) }; item.anexos = item.anexos || [];
+    const files = [...t.files];
+    abrirFolha(`<h2>Processando anexo…</h2><p class="muted" id="anxprog"></p>`);
+    for (const [i, f] of files.entries()) {
+      const pg = $('#anxprog'); if (pg) pg.textContent = 'Arquivo ' + (i + 1) + ' de ' + files.length + ': ' + f.name + ' (' + fmtTam(f.size) + ')';
+      const tp = f.type || '';
+      try { item.anexos.push(await criarAnexo(c, f, tp.startsWith('video/') ? 'video' : tp.startsWith('image/') ? 'foto' : 'documento', { itemChecklist: id })); } catch (er) { toast('Falha ao anexar ' + f.name); }
+    }
+    await DB.salvar(c); fecharFolha(); render(); toast('Anexo salvo'); return;
+  }
   if (t.dataset.chk) { c.checklist[t.dataset.chk] = { ...(c.checklist[t.dataset.chk] || {}), ok: t.checked }; await DB.salvar(c); render(); return; }
   if (t.dataset.c === 'natureza') { c.natureza = t.value; await DB.salvar(c); render(); }
 });
