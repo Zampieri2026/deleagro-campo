@@ -4,7 +4,7 @@
 
 const fmtTam = b => !b ? '' : b < 1048576 ? (b / 1024).toFixed(0) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
 const fmtDur = s => { if (!s || !isFinite(s)) return ''; s = Math.round(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
-const ROT_ORIGEM = { oitiva: 'Oitiva em vídeo', video: 'Vídeo', documento: 'Documento', foto: 'Foto', desenho: 'Desenho de marca' };
+const ROT_ORIGEM = { oitiva: 'Oitiva em vídeo', video: 'Vídeo', audio: 'Gravação de áudio', documento: 'Documento', foto: 'Foto', desenho: 'Desenho de marca' };
 
 /* SHA-256 em blocos (não carrega o vídeo inteiro na memória) */
 async function sha256Blob(blob) {
@@ -42,6 +42,15 @@ function infoVideo(blob) {
   });
 }
 
+function duracaoAudio(blob) {
+  return new Promise(ok => {
+    const a = document.createElement('audio'), url = URL.createObjectURL(blob);
+    const t = setTimeout(() => { URL.revokeObjectURL(url); ok(0); }, 6000);
+    a.preload = 'metadata'; a.onloadedmetadata = () => { clearTimeout(t); URL.revokeObjectURL(url); ok(isFinite(a.duration) ? a.duration : 0); };
+    a.onerror = () => { clearTimeout(t); URL.revokeObjectURL(url); ok(0); }; a.src = url;
+  });
+}
+
 /* Processa um arquivo e grava no aparelho; devolve os metadados que ficam no caso */
 async function criarAnexo(c, file, origem, extra = {}) {
   const meta = {
@@ -52,6 +61,7 @@ async function criarAnexo(c, file, origem, extra = {}) {
   meta.sha256 = hash;
   if (pos) { meta.appLat = pos.lat; meta.appLng = pos.lng; meta.appPrec = pos.prec; }
   if (meta.tipo.startsWith('video/')) Object.assign(meta, await infoVideo(file));
+  else if (meta.tipo.startsWith('audio/') && !meta.duracao) meta.duracao = await duracaoAudio(file);
   else if (meta.tipo.startsWith('image/')) {
     try { const r = await reduzirImagem(file, 420); meta.thumb = r.data; meta.dimOriginal = r.wOrig + '×' + r.hOrig; } catch (e) {}
     if (origem !== 'desenho') Object.assign(meta, await lerExif(file));
@@ -78,8 +88,8 @@ function metaAnexo(m) {
 function htmlAnexos(lista) {
   if (!lista || !lista.length) return '<p class="muted">Nenhum anexo.</p>';
   return `<div class="anexos">${lista.map(m => `<button type="button" class="anx" data-anx="${m.id}">
-    ${m.thumb ? `<img src="${m.thumb}" alt="">` : `<span class="anx-ico">${m.tipo === 'application/pdf' ? 'PDF' : m.tipo.startsWith('video/') ? '▶' : 'ARQ'}</span>`}
-    ${m.tipo.startsWith('video/') ? `<span class="anx-play">▶ ${fmtDur(m.duracao)}</span>` : ''}
+    ${m.thumb ? `<img src="${m.thumb}" alt="">` : `<span class="anx-ico">${m.tipo === 'application/pdf' ? 'PDF' : m.tipo.startsWith('video/') ? '▶' : m.tipo.startsWith('audio/') ? '♪' : 'ARQ'}</span>`}
+    ${m.tipo.startsWith('video/') || m.tipo.startsWith('audio/') ? `<span class="anx-play">▶ ${fmtDur(m.duracao)}</span>` : ''}
     <span class="anx-t">${esc(m.legenda || ROT_ORIGEM[m.origem])}</span></button>`).join('')}</div>`;
 }
 
@@ -89,6 +99,7 @@ async function verAnexo(c, dono, m, voltar) {
   const url = reg && reg.blob ? URL.createObjectURL(reg.blob) : '';
   let midia = '<p class="warn">Arquivo não encontrado neste aparelho.</p>';
   if (url && m.tipo.startsWith('video/')) midia = `<video class="full" src="${url}" controls playsinline preload="metadata"></video>`;
+  else if (url && m.tipo.startsWith('audio/')) midia = `<audio class="full" src="${url}" controls preload="metadata"></audio>`;
   else if (url && m.tipo.startsWith('image/')) midia = `<img class="full${m.origem === 'desenho' ? ' desenho' : ''}" src="${url}" alt="">`;
   else if (url) midia = `<p><a class="btn ghost" href="${url}" target="_blank" rel="noopener">Abrir ${esc(m.nome)}</a></p>`;
   const sair = () => { if (url) URL.revokeObjectURL(url); voltar(); };

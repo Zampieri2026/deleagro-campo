@@ -1,6 +1,6 @@
 /* Service worker: guarda os arquivos do app para uso offline no campo. Não armazena dados de ocorrências. */
-const CACHE = 'deleagro-campo-v4';
-const ARQUIVOS = ['./', './index.html', './app.js', './data.js', './anexos.js', './lib/hashwasm-sha256.js', './manifest.json', './lib/jspdf.umd.min.js', './lib/exifr.lite.js', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './logo-deleagro.png', './logo-pcms.png'];
+const CACHE = 'deleagro-campo-v5';
+const ARQUIVOS = ['./', './index.html', './app.js', './data.js', './anexos.js', './historico.js', './lib/hashwasm-sha256.js', './manifest.json', './lib/jspdf.umd.min.js', './lib/exifr.lite.js', './icon-180.png', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './logo-deleagro.png', './logo-pcms.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => Promise.allSettled(ARQUIVOS.map(a => c.add(a)))).then(() => self.skipWaiting()));

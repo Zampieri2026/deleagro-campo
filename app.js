@@ -175,10 +175,10 @@ function cardCaso(c) {
 }
 
 /* ----- ocorrência ----- */
-const ABAS = [['local', 'Local'], ['pessoas', 'Pessoas'], ['bens', 'Bens'], ['check', 'Checklist'], ['rel', 'Relatório']];
+const ABAS = [['local', 'Local'], ['pessoas', 'Pessoas'], ['bens', 'Bens'], ['check', 'Checklist'], ['hist', 'Histórico'], ['rel', 'Relatório']];
 function telaCaso() {
   const c = casoAtual(); if (!c) { S.tela = 'lista'; return telaLista(); }
-  const corpo = { local: abaLocal, pessoas: abaPessoas, bens: abaBens, check: abaCheck, rel: abaRel }[S.aba](c);
+  const corpo = { local: abaLocal, pessoas: abaPessoas, bens: abaBens, check: abaCheck, hist: abaHist, rel: abaRel }[S.aba](c);
   return `
   <header class="top sticky"><button class="btn ghost sm" data-acao="voltar">‹ Ocorrências</button>
     <span id="salvo" class="muted">${DB.persistente ? 'Salvo automaticamente' : 'Sem armazenamento'}</span></header>
@@ -186,6 +186,7 @@ function telaCaso() {
   <main>${corpo}</main>`;
 }
 function contAba(c, id) {
+  if (id === 'hist') return c.historico && c.historico.texto ? ' <b class="cnt">✓</b>' : '';
   const n = id === 'pessoas' ? c.pessoas.length : id === 'bens' ? c.bens.length : 0;
   return n ? ` <b class="cnt">${n}</b>` : '';
 }
@@ -394,6 +395,7 @@ function abaCheck(c) {
 /* Numeração dos anexos para referência cruzada no relatório */
 function numerarAnexos(c) {
   const lista = [];
+  ((c.historico || {}).anexos || []).forEach(m => lista.push({ m, ref: 'Histórico — ' + ((c.historico.fonte === 'policial') ? 'relato do policial' : 'entrevista com o comunicante') }));
   c.pessoas.forEach(p => (p.anexos || []).forEach(m => lista.push({ m, ref: 'Pessoa: ' + (p.nome || papel(p.papel).nome) + ' (' + papel(p.papel).nome.toLowerCase() + ')' })));
   c.bens.forEach(b => (b.anexos || []).forEach(m => lista.push({ m, ref: 'Bem: ' + (b.descricao || catBem(b.categoria).nome) })));
   itensChecklist(c).forEach(([id, t]) => ((c.checklist[id] || {}).anexos || []).forEach(m => lista.push({ m, ref: 'Diligência: ' + t })));
@@ -410,14 +412,18 @@ function textoRelatorio(c) {
   add('Natureza: ' + n.nome + (n.cap ? ' (' + n.cap + ')' : ''));
   if (c.bo) add('BO: ' + c.bo); if (c.ip) add('IP: ' + c.ip);
   if (c.responsavel) add('Responsável: ' + c.responsavel);
-  add('', '1. LOCAL E DATA');
+  const hs = c.historico || {};
+  add('', '1. HISTÓRICO');
+  add(hs.texto ? hs.texto.trim() : '(histórico ainda não montado)');
+  ((hs.anexos) || []).forEach(m => add('  Anexo ' + linhaAnexo(m, num)));
+  add('', '2. LOCAL E DATA');
   add('Propriedade: ' + (L.propriedade || '—') + (L.municipio ? ', ' + L.municipio : ''));
   if (L.endereco) add('Acesso: ' + L.endereco); if (L.referencia) add('Referência: ' + L.referencia);
   if (L.lat && L.lng) add('Coordenadas: ' + L.lat + ', ' + L.lng + (L.precisao ? ' (±' + L.precisao + ' m)' : ''));
   add('Data do fato: ' + (fmtData(L.dataFato) || '—') + (L.horaFato ? ' por volta das ' + L.horaFato : '') + (L.dataComunicacao ? ' · Comunicação: ' + fmtData(L.dataComunicacao) : ''));
   if (L.descricao) add('', 'Descrição do local: ' + L.descricao);
   if (L.modus) add('', 'Modus operandi: ' + L.modus);
-  add('', '2. PESSOAS ENVOLVIDAS');
+  add('', '3. PESSOAS ENVOLVIDAS');
   if (!c.pessoas.length) add('Nenhuma pessoa cadastrada.');
   PAPEIS.forEach(p => c.pessoas.filter(x => x.papel === p.id).forEach(x => {
     const q = [x.apelido && 'vulgo "' + x.apelido + '"', x.nasc && 'nascido(a) em ' + fmtData(x.nasc), x.cpf && 'CPF ' + x.cpf, x.rg && 'RG ' + x.rg,
@@ -430,7 +436,7 @@ function textoRelatorio(c) {
     if (x.relato) add('  Declarações: ' + x.relato);
     (x.anexos || []).forEach(m => add('  Anexo ' + linhaAnexo(m, num)));
   }));
-  add('', '3. BENS');
+  add('', '4. BENS');
   if (!c.bens.length) add('Nenhum bem cadastrado.');
   let total = 0;
   c.bens.forEach(b => {
@@ -442,7 +448,7 @@ function textoRelatorio(c) {
     (b.anexos || []).forEach(m => add('  Anexo ' + linhaAnexo(m, num)));
   });
   if (total) add('Valor estimado total: ' + moeda(total));
-  add('', '4. DILIGÊNCIAS (CHECKLIST)');
+  add('', '5. DILIGÊNCIAS (CHECKLIST)');
   secoesChecklist(c).forEach(s => s.itens.forEach(([id, t]) => {
     const v = c.checklist[id]; if (v && (v.ok || v.obs || (v.anexos || []).length)) {
       add((v.ok ? '[x] ' : '[ ] ') + t + (v.obs ? ' — ' + v.obs : ''));
@@ -451,7 +457,7 @@ function textoRelatorio(c) {
   }));
   const pend = itensChecklist(c).filter(([id]) => !c.checklist[id]?.ok);
   if (pend.length) { add('', 'Pendentes:'); pend.forEach(([, t]) => add('[ ] ' + t)); }
-  if (c.fotos.length) add('', '5. FOTOGRAFIAS: ' + c.fotos.length + ' registro(s) no aparelho.');
+  if (c.fotos.length) add('', '6. FOTOGRAFIAS: ' + c.fotos.length + ' registro(s) no aparelho.');
   if (c.notas) add('', 'ANOTAÇÕES: ' + c.notas);
   add('', 'Gerado em ' + fmtDH(Date.now()) + ' — DELEAGRO Campo.');
   return linhas.join('\n');
@@ -665,7 +671,7 @@ async function montarPDF(c) {
   for (const l of linhas) {
     if (l.startsWith('Gerado em')) continue;
     if (!l.trim()) { y += 2; continue; }
-    if (/^5\. FOTOGRAFIAS/.test(l)) continue;
+    if (/^\d\. FOTOGRAFIAS/.test(l)) continue;
     if (ehTitulo(l) && !/^ANOTAÇÕES:/.test(l)) {
       garante(12); y += 2;
       doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...verde);
@@ -833,6 +839,10 @@ document.addEventListener('click', async e => {
   if (t.dataset.abrir) { S.casoId = t.dataset.abrir; S.tela = 'caso'; S.aba = 'local'; render(); return; }
   if (t.dataset.aba) { S.aba = t.dataset.aba; render(); return; }
   if (t.dataset.foto) { verFoto(c, c.fotos.find(f => f.id === t.dataset.foto)); return; }
+  if (t.dataset.hfonte) { hist(c).fonte = t.dataset.hfonte; await DB.salvar(c); render(); return; }
+  if (t.dataset.anx && t.closest('[data-histanx]')) {
+    const h = hist(c); verAnexo(c, h, h.anexos.find(m => m.id === t.dataset.anx), () => { fecharFolha(); render(); }); return;
+  }
   if (t.dataset.anx && t.closest('[data-chkitem]')) {
     const item = c.checklist[t.closest('[data-chkitem]').dataset.chkitem];
     verAnexo(c, item, item.anexos.find(m => m.id === t.dataset.anx), () => { fecharFolha(); render(); }); return;
@@ -849,6 +859,16 @@ document.addEventListener('click', async e => {
     case 'copiar': copiar(textoRelatorio(c)); break;
     case 'compartilhar': try { if (navigator.share) await navigator.share({ title: 'Levantamento ' + (c.bo || ''), text: textoRelatorio(c) }); else copiar(textoRelatorio(c)); } catch (er) { if (er.name !== 'AbortError') copiar(textoRelatorio(c)); } break;
     case 'pdf': gerarPDF(c); break;
+    case 'gravar-audio': alternarGravacao(c); break;
+    case 'ditar': alternarDitado(c); break;
+    case 'montar-hist': {
+      const h = hist(c);
+      if (h.texto && h.editado && !(await confirmar('O histórico foi editado à mão. Remontar substitui o texto atual. Continuar?', 'Remontar', false))) break;
+      h.texto = montarHistorico(c); h.editado = false; await DB.salvar(c); render();
+      const ta = $('#textoHist'); if (ta) ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast('Histórico montado — revise antes de usar'); break;
+    }
+    case 'copiar-hist': copiar(hist(c).texto); break;
     case 'exportar-caso': toast('Preparando backup…'); compartilharArquivo('ocorrencia-' + (c.bo || c.id).toString().replace(/[^\w-]+/g, '_') + '.json', await backupJSON([c]), 'application/json'); break;
     case 'exportar': toast('Preparando backup…'); compartilharArquivo('deleagro-campo-backup-' + hoje() + '.json', await backupJSON(S.casos), 'application/json'); break;
     case 'apagar-tudo': if (await confirmar('Apagar TODAS as ocorrências deste aparelho? Faça um backup antes.', 'Apagar tudo')) { for (const x of S.casos) { for (const m of await DB.anexosDoCaso(x.id)) await DB.apagarAnexo(m.id); await DB.apagar(x.id); } S.casos = []; render(); toast('Dados apagados'); } break;
@@ -864,6 +884,8 @@ document.addEventListener('input', e => {
   if (t.dataset.pref) { Pref.set(t.dataset.pref, t.value); return; }
   const c = casoAtual(); if (!c) return;
   if (t.dataset.c) { setPath(c, t.dataset.c, t.value); salvarDepois(c); }
+  if (t.dataset.h) { const h = hist(c); h[t.dataset.h] = t.value; if (t.dataset.h === 'texto') h.editado = true; salvarDepois(c); }
+  if (t.dataset.hr) { hist(c).roteiro[t.dataset.hr] = t.value; salvarDepois(c); }
   if (t.dataset.chkobs) { c.checklist[t.dataset.chkobs] = { ...(c.checklist[t.dataset.chkobs] || {}), obs: t.value }; salvarDepois(c); }
 });
 
@@ -873,6 +895,13 @@ document.addEventListener('change', async e => {
   if (t.dataset.acao === 'fotos' && t.files.length) { adicionarFotos(c, [...t.files]); return; }
   if (t.dataset.acao === 'importar' && t.files[0]) { importar(t.files[0]); return; }
   if (!c) return;
+  if (t.dataset.h === 'comunicanteId') { hist(c).comunicanteId = t.value; await DB.salvar(c); return; }
+  if (t.dataset.histAnx !== undefined && t.files.length) {
+    const h = hist(c), files = [...t.files];
+    abrirFolha(`<h2>Processando gravação…</h2><p class="muted">Calculando hash e duração.</p>`);
+    for (const f of files) { try { h.anexos.push(await criarAnexo(c, f, (f.type || '').startsWith('video/') ? 'video' : 'audio', { legenda: h.fonte === 'entrevista' ? 'Entrevista com o comunicante' : 'Relato do policial' })); } catch (er) { toast('Falha ao anexar ' + f.name); } }
+    await DB.salvar(c); fecharFolha(); render(); toast('Gravação anexada'); return;
+  }
   if (t.dataset.chkAnx && t.files.length) {
     const id = t.dataset.chkAnx, item = c.checklist[id] = { ...(c.checklist[id] || {}) }; item.anexos = item.anexos || [];
     const files = [...t.files];
